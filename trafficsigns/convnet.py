@@ -3,7 +3,10 @@ from tqdm import tqdm
 import logging
 
 class ConvNet:
-    def __init__(self, train_data, test_data=None):
+    def __init__(self, train_data=None, test_data=None):
+        if train_data==None and test_data==None:
+            return
+
         assert(train_data.get_is_pre_processed())
         assert(test_data.get_is_pre_processed())
 
@@ -26,9 +29,6 @@ class ConvNet:
             'fully_connected_1': 1024,
             'fully_connected_2': 1024
         }
-
-        #filter_size_width = 5
-        #filter_size_height = 5
 
         self.weights = {
             # filter_size_width, filter_size_height, color_channels, k_output
@@ -127,7 +127,7 @@ class ConvNet:
         self.logger.info("Create A.D.A.G.R.A.D optimizer")
         return tf.train.AdagradOptimizer(learning_rate=current_learning_rate).minimize(cost)
 
-    def run(self, training_epochs, learning_rate, batch_size, dropout):
+    def train(self, training_epochs, learning_rate, batch_size, dropout):
         self.logger.info("training_epochs: %s, learning_rate: %s, batch_size: %s, dropout: %s" % (training_epochs, learning_rate, batch_size, dropout))
 
         # tf input
@@ -182,7 +182,9 @@ class ConvNet:
 
                 self.logger.info("Epoch %04d cost=%s, train_accurarcy=%s, validation_acc=%s" % ((epoch+1), "{:.9f}".format(loss), "{:.5f}".format(training_acc), "{:.5f}".format(validation_acc)))
 
-            print("Optimization Finished!")
+            self.logger.info("Optimization Finished! Saving model ...")
+            saver = tf.train.Saver()
+            saver.save(sess, "dnn-traffic-signs-trained-model.dat")
 
             if self.test_data:
                 # Test model
@@ -190,3 +192,11 @@ class ConvNet:
                 # Calculate accuracy
                 accuracy = tf.reduce_mean(tf.cast(correct_prediction, "float"))
                 self.logger.info("Accuracy: %s" % (accuracy.eval({x: self.test_data.get_features(), y: self.test_data.get_labels(), keep_prob: 1.0})))
+
+    def restore(self):
+        sess = tf.Session()
+        new_saver = tf.train.import_meta_graph('dnn-traffic-signs-trained-model.dat.meta')
+        new_saver.restore(sess, 'dnn-traffic-signs-trained-model.dat')
+        all_vars = tf.trainable_variables()
+        for v in all_vars:
+            print(v.get_shape())
