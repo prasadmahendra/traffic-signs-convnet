@@ -1,17 +1,21 @@
+import os
 import sys
 import math
 import pickle
 import logging
 import cv2
+import csv
 import numpy as np
+import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 from tqdm import tqdm
+from PIL import Image
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelBinarizer
 
 class ImageData:
-    def __init__(self, pickle_features_and_labels_file, debug=False):
+    def __init__(self, pickle_features_and_labels_file=None, debug=False):
         self.features_and_labels_file = pickle_features_and_labels_file
         self.features = {}
         self.labels = []
@@ -20,17 +24,28 @@ class ImageData:
         logging.basicConfig(format="%(asctime)s %(message)s", level=logging.INFO)
         self.logger = logging.getLogger(__name__)
 
-        with open(self.features_and_labels_file, mode='rb') as f:
-            loaded = pickle.load(f)
-            self.features = loaded['features']
-            self.labels = loaded['labels']
+        if self.features_and_labels_file:
+            with open(self.features_and_labels_file, mode='rb') as f:
+                loaded = pickle.load(f)
+                self.features = loaded['features']
+                self.labels = loaded['labels']
 
-        if self.debug:
-            self.logger.info("debug: %s", self.debug)
-            self.__take_subset_of_data()
+            if self.debug:
+                self.logger.info("debug: %s", self.debug)
+                self.__take_subset_of_data()
 
-        self.n_labels = len(self.labels)
-        self.n_classes = len(set(self.labels))
+            self.n_labels = len(self.labels)
+            #self.n_classes = len(set(self.labels))
+        else:
+            self.n_labels = 0
+
+        self.n_labels_friendly_names = {}
+        with open('../data/signnames.csv', 'rt', encoding='utf8') as csvfile:
+            reader = csv.DictReader(csvfile)
+            for row in reader:
+                self.n_labels_friendly_names[row['ClassId']] = row['SignName']
+
+        self.n_classes = len(self.n_labels_friendly_names)
         self.is_pre_processed = False
         self.hot_encoded_labels = False
         self.new_data_generated = False
@@ -170,6 +185,72 @@ class ImageData:
 
             plt.show()
 
+    def to_grayscale(self, image):
+        """"Convert to grayscale"""
+        return cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+
+    def to_yuvspace(self, image):
+        """"Convert to YUV colorspace"""
+        return cv2.cvtColor(image, cv2.COLOR_BGR2YUV)
+
+
+    def normalize(self, image):
+        return cv2.normalize(image, image, alpha=0.1, beta=0.9, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
+
+
+    def mean_subtraction(self, image):
+        image = image.astype(dtype='float64')
+        image -= np.mean(image, dtype='float64', axis=0)
+        return image
+
+
+    def transform_image(self, img, ang_range, shear_range, trans_range):
+        # Rotation
+
+        ang_rot = np.random.uniform(ang_range) - ang_range / 2
+        rows, cols, ch = img.shape
+        Rot_M = cv2.getRotationMatrix2D((cols / 2, rows / 2), ang_rot, 1)
+
+        # Translation
+        tr_x = trans_range * np.random.uniform() - trans_range / 2
+        tr_y = trans_range * np.random.uniform() - trans_range / 2
+        Trans_M = np.float32([[1, 0, tr_x], [0, 1, tr_y]])
+
+        # Shear
+        pts1 = np.float32([[5, 5], [20, 5], [5, 20]])
+
+        pt1 = 5 + shear_range * np.random.uniform() - shear_range / 2
+        pt2 = 20 + shear_range * np.random.uniform() - shear_range / 2
+
+        pts2 = np.float32([[pt1, 5], [pt2, pt1], [5, pt2]])
+
+        shear_M = cv2.getAffineTransform(pts1, pts2)
+
+        img = cv2.warpAffine(img, Rot_M, (cols, rows))
+        img = cv2.warpAffine(img, Trans_M, (cols, rows))
+        img = cv2.warpAffine(img, shear_M, (cols, rows))
+
+        return img
+
+    def pre_process_image(self, image):
+        image = self.to_yuvspace(image)
+        image = self.mean_subtraction(image)
+        image = self.normalize(image)
+        return image
+
+    def load_image_from_file(self, image_file):
+        if os.path.isfile(image_file):
+            #img = mpimg.imread(image_file)
+            img = Image.open(image_file)
+            img = img.resize((32, 32), Image.ANTIALIAS)
+            img = np.asarray(img)
+            img = self.pre_process_image(img)
+            height, width, channels = img.shape
+            self.logger.info("Image loaded: %s" % (str(img.shape)))
+            return img, height, width, channels
+        else:
+            raise FileNotFoundError(image_file)
 
 class TrainData(ImageData):
     def __init__(self, pickle_features_and_labels_file, debug=False):
@@ -220,7 +301,7 @@ class TrainData(ImageData):
     def reset_batch_to_start(self):
         self.index_in_epoch = 0
 
-    def total_batches(self, batch_size):
+    def get_train_batches_count(self, batch_size):
         return math.ceil(len(self.get_train_features()) / batch_size)
 
     def has_next_batch(self):
@@ -243,53 +324,9 @@ class TrainData(ImageData):
     def get_epochs_completed(self):
         return self.epochs_completed
 
-    def to_grayscale(self, image):
-        """"Convert to grayscale"""
-        return cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
-    def to_yuvspace(self, image):
-        """"Convert to YUV colorspace"""
-        return cv2.cvtColor(image, cv2.COLOR_BGR2YUV)
-
-    def normalize(self, image):
-        return cv2.normalize(image, image, alpha=0.1, beta=0.9, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
-
-    def mean_subtraction(self, image):
-        image = image.astype(dtype='float64')
-        image -= np.mean(image, dtype='float64', axis=0)
-        return image
-
-    def transform_image(self, img, ang_range, shear_range, trans_range):
-        # Rotation
-
-        ang_rot = np.random.uniform(ang_range) - ang_range / 2
-        rows, cols, ch = img.shape
-        Rot_M = cv2.getRotationMatrix2D((cols / 2, rows / 2), ang_rot, 1)
-
-        # Translation
-        tr_x = trans_range * np.random.uniform() - trans_range / 2
-        tr_y = trans_range * np.random.uniform() - trans_range / 2
-        Trans_M = np.float32([[1, 0, tr_x], [0, 1, tr_y]])
-
-        # Shear
-        pts1 = np.float32([[5, 5], [20, 5], [5, 20]])
-
-        pt1 = 5 + shear_range * np.random.uniform() - shear_range / 2
-        pt2 = 20 + shear_range * np.random.uniform() - shear_range / 2
-
-        pts2 = np.float32([[pt1, 5], [pt2, pt1], [5, pt2]])
-
-        shear_M = cv2.getAffineTransform(pts1, pts2)
-
-        img = cv2.warpAffine(img, Rot_M, (cols, rows))
-        img = cv2.warpAffine(img, Trans_M, (cols, rows))
-        img = cv2.warpAffine(img, shear_M, (cols, rows))
-
-        return img
-
     def pre_process(self, gen_variants=False):
         if not self.is_pre_processed:
-            self.logger.info("pre-process %s data ..." % (self.type()))
+            self.logger.info("Preprocess %s data ..." % (self.type()))
             if gen_variants:
                 self.generate_new_data()
 
@@ -298,18 +335,16 @@ class TrainData(ImageData):
             self.logger.info("convert images to YUV color space ...")
             self.logger.info("mean subtract (zero center) all features ...")
             self.logger.info("min-max rescale/normalize image pixel values ...")
-            for image in tqdm(self.features, desc='Pre-process images', unit='image'):
-                image = self.to_yuvspace(image)
-                image = self.mean_subtraction(image)
-                image = self.normalize(image)
+            for image in tqdm(self.features, desc="Pre-process %s images" % (self.type()), unit='image'):
+                image = self.pre_process_image(image)
                 features_new[count] = image
                 count += 1
 
             self.features = features_new
             self.one_hot_encode_labels()
 
-            self.logger.info("Preprocessed features: %s" % (len(self.features)))
-            self.logger.info("1-hot encoded labels: %s" % (len(self.labels)))
+            self.logger.info("Preprocessed %s features: %s" % (self.type(), len(self.features)))
+            self.logger.info("1-hot encoded %s labels: %s" % (self.type(), len(self.labels)))
             self.is_pre_processed = True
 
     def generate_new_data(self):
