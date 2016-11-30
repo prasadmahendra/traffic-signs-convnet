@@ -71,7 +71,7 @@ class ConvNet:
             padding='SAME')
 
     # Create model
-    def conv_net(self, x, weights, biases, keep_prob):
+    def conv_net(self, activation, x, weights, biases, keep_prob):
         layer = 1
 
         conv1 = self.conv2d(x, weights['layer_1'], biases['layer_1'], keep_prob)
@@ -105,14 +105,14 @@ class ConvNet:
         conv3_flat = tf.reshape(conv3, [-1, weights['fully_connected_1'].get_shape().as_list()[0]])
         fc1 = tf.add(tf.matmul(conv3_flat, weights['fully_connected_1']), biases['fully_connected_1'])
         self.logger.info("\tfc1 Layer %s: %s", layer, fc1.get_shape())
-        fc1 = tf.nn.relu(fc1)
+        fc1 = self.get_activation_func(activation, fc1)
         fc1 = tf.nn.dropout(fc1, keep_prob)
 
         layer += 1
 
         fc2 = tf.add(tf.matmul(fc1, weights['fully_connected_2']), biases['fully_connected_2'])
-        self.logger.info("\tfc2 Layer %s: %s", layer, fc1.get_shape())
-        fc2 = tf.nn.relu(fc2)
+        self.logger.info("\tfc2 Layer %s: %s", layer, fc2.get_shape())
+        fc2 = self.get_activation_func(activation, fc2)
         fc2 = tf.nn.dropout(fc2, keep_prob)
 
         layer += 1
@@ -123,11 +123,32 @@ class ConvNet:
 
         return out
 
-    def get_optimizer_tensor(self, cost, current_learning_rate, current_iteration):
-        self.logger.info("Create A.D.A.G.R.A.D optimizer")
-        return tf.train.AdagradOptimizer(learning_rate=current_learning_rate).minimize(cost)
+    def get_activation_func(self, activation, fc):
+        if activation == "tanh":
+            self.logger.info("\tactivation funciton=tanh")
+            return tf.nn.tanh(fc)
+        elif activation == "sigmoid":
+            self.logger.info("\tactivation funciton=sigmoid")
+            return tf.nn.sigmoid(fc)
+        else:
+            self.logger.info("\tactivation funciton=relu")
+            return tf.nn.relu(fc)
 
-    def train(self, training_epochs, learning_rate, batch_size, dropout):
+    def get_optimizer_tensor(self, cost, optimizer, learning_rate, current_iteration):
+        if optimizer.lower() == "adagradoptimizer":
+            self.logger.info("optimizer=AdagradOptimizer")        
+            return tf.train.AdagradOptimizer(learning_rate=learning_rate).minimize(cost)
+        elif optimizer.lower() == "momentumoptimizer":
+            self.logger.info("optimizer=MomentumOptimizer")       
+            return tf.train.MomentumOptimizer(learning_rate=learning_rate, momentum=1.0).minimize(cost)
+        elif optimizer.lower() == "adamoptimizer":
+            self.logger.info("optimizer=AdamOptimizer")       
+            return tf.train.AdamOptimizer(learning_rate=learning_rate, beta1=0.9, beta2=0.999, epsilon=1e-08).minimize(cost)
+        elif optimizer.lower() == "gradientdescentoptimizer":
+            self.logger.info("optimizer=GradientDescentOptimizer")       
+            return tf.train.GradientDescentOptimizer(learning_rate=learning_rate).minimize(cost)
+
+    def train(self, training_epochs, learning_rate, activation, optimizer, batch_size, dropout):
         self.logger.info("training_epochs: %s, learning_rate: %s, batch_size: %s, dropout: %s" % (training_epochs, learning_rate, batch_size, dropout))
 
         # tf input
@@ -138,14 +159,14 @@ class ConvNet:
 
         self.logger.info("create model ...")
         # create our model
-        logits = self.conv_net(x, self.weights, self.biases, keep_prob)
+        logits = self.conv_net(activation,  x, self.weights, self.biases, keep_prob)
 
         self.logger.info("create cost (or loss) and optimizer ...")
         # cost (or loss) and optimizer
 
         cross_entropy = tf.nn.softmax_cross_entropy_with_logits(logits, y)
         cost = tf.reduce_mean(cross_entropy)
-        optimizer = self.get_optimizer_tensor(cost, current_learning_rate=learning_rate, current_iteration=0)
+        optimizer = self.get_optimizer_tensor(cost, optimizer=optimizer, learning_rate=learning_rate, current_iteration=0)
 
         self.logger.info("create prediction and accuracy tensors ...")
         # prediction and accuracy
@@ -154,12 +175,14 @@ class ConvNet:
 
         self.logger.info("init ...")
         # Initializing the variables
-        init = tf.initialize_all_variables()
+        #init = tf.initialize_all_variables()
 
         self.logger.info("launch graph ...")
         # Launch the graph
-        with tf.Session() as sess:
-            sess.run(init)
+        with tf.Session(config=tf.ConfigProto(log_device_placement=False)) as sess:
+            #sess.run(init)
+            tf.global_variables_initializer().run()
+
             # Training cycle
             for epoch in range(training_epochs):
                 self.train_data.reset_batch_to_start()

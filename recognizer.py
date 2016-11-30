@@ -16,6 +16,8 @@ parser.add_argument('-testdatafile', default="../data/test.p", help='Test data p
 parser.add_argument('-traindatafile', default="../data/train.p", help='Train data pickle file path')
 parser.add_argument('-epochs', default=30, type=int, help='Number of training epochs')
 parser.add_argument('-learning_rate', default=0.01, type=float, help='Learning rate')
+parser.add_argument('-optimizer', default="AdamOptimizer", help='Optimizer (GradientDescentOptimizer, AdagradOptimizer, MomentumOptimizer, AdamOptimizer (default))')
+parser.add_argument('-activation', default="relu", help='Activation funciton (relu (default), tanh, sigmoid)')
 parser.add_argument('-learning_rate_decay', default="exp", help='Learning rate exp decay')
 parser.add_argument('-batch_size', default=128, type=int, help='Batch size')
 parser.add_argument('-dropout', default=1.0, type=float, help='Dropout')
@@ -56,6 +58,8 @@ def run(args):
         nn = ConvNet(train_data, test_data)
         nn.train(training_epochs=args.epochs,
                  learning_rate=args.learning_rate,
+                 activation=args.activation,
+                 optimizer=args.optimizer,
                  batch_size=args.batch_size,
                  dropout=args.dropout)
     elif args.cmd == "predict":
@@ -63,7 +67,8 @@ def run(args):
         nn.restore()
         nn.predict(args.input_image)
 
-# from cmd line: python recognizer.py -epochs=500 -learning_rate=0.001 -batch_size=100 -dropout=0.8 -genfakedata
+# python recognizer.py -cmd traindnn -traindatafile data/train.p -testdatafile data/test.p -epoch 100 -dropout=0.5 -batch_size 128 -activation relu -optimizer AdagradOptimizer -learning_rate 0.01 > dnn-output.txt 2>&1
+# python recognizer.py -cmd traindnn -traindatafile data/train.p -testdatafile data/test.p -epoch 100 -dropout=0.95 -genfakedata > dnn-output.txt 2>&1
 # python recognizer.py -epochs=100 -learning_rate=0.01 -batch_size=128 -dropout=0.95 -cmd traindnn
 # python recognizer.py -epochs=100 -learning_rate=0.01 -batch_size=128 -dropout=0.95 -cmd traindnn -genfakedata > dnn-output.txt 2>&1
 run(args)
