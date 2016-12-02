@@ -1,3 +1,4 @@
+import matplotlib
 import os
 import sys
 import math
@@ -6,7 +7,6 @@ import logging
 import cv2
 import csv
 import numpy as np
-import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 from tqdm import tqdm
@@ -35,12 +35,11 @@ class ImageData:
                 self.__take_subset_of_data()
 
             self.n_labels = len(self.labels)
-            #self.n_classes = len(set(self.labels))
         else:
             self.n_labels = 0
 
         self.n_labels_friendly_names = {}
-        with open('../data/signnames.csv', 'rt', encoding='utf8') as csvfile:
+        with open('data/signnames.csv', 'rt', encoding='utf8') as csvfile:
             reader = csv.DictReader(csvfile)
             for row in reader:
                 self.n_labels_friendly_names[row['ClassId']] = row['SignName']
@@ -163,6 +162,10 @@ class ImageData:
         print("\tcount: %s" % (len(self.labels)))
         print("\tunique labels (classes): %s" % (len(unique_train_labels)))
 
+        print("Label ID\tName")
+        for label_id in sorted(self.n_labels_friendly_names.keys()):
+            print("%s\t%s" % (label_id, self.n_labels_friendly_names.get(label_id)))
+
         display = True
         if prompt_for_images:
             display = self.query_yes_no("Display representative sample images?", "no")
@@ -241,7 +244,6 @@ class ImageData:
 
     def load_image_from_file(self, image_file):
         if os.path.isfile(image_file):
-            #img = mpimg.imread(image_file)
             img = Image.open(image_file)
             img = img.resize((32, 32), Image.ANTIALIAS)
             img = np.asarray(img)

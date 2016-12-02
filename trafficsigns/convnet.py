@@ -4,13 +4,17 @@ import logging
 import numpy as np
 import tensorflow as tf
 from tqdm import tqdm
+import matplotlib
+matplotlib.use('Agg') # Force matplotlib to not use any Xwindows backend.
+import matplotlib.pyplot as plt
 from trafficsigns.data import ImageData
 
 class ConvNet:
-    def __init__(self, train_data=None, test_data=None):
+    def __init__(self, train_data=None, test_data=None, save_model = True):
         logging.basicConfig(format="%(asctime)s %(message)s", level=logging.INFO)
 
         self.logger = logging.getLogger(__name__)
+        self.save_model = save_model
         self.saved_model_file = 'dnn-traffic-signs-trained-model.dat'
         self.saved_model_meta_file = "%s.meta" % (self.saved_model_file)
 
@@ -88,7 +92,6 @@ class ConvNet:
         self.logger.info("\tconv2d Layer %s: %s", layer, conv1.get_shape())
         conv1 = self.maxpool2d(conv1, strides=1)
         self.logger.info("\tmaxpool2d Layer %s: %s", layer, conv1.get_shape())
-        conv1 = tf.nn.dropout(conv1, keep_prob)
 
         layer += 1
 
@@ -97,7 +100,6 @@ class ConvNet:
         self.logger.info("\tconv2d Layer %s: %s", layer, conv2.get_shape())
         conv2 = self.maxpool2d(conv2)
         self.logger.info("\tmaxpool2d Layer %s: %s", layer, conv2.get_shape())
-        conv2 = tf.nn.dropout(conv2, keep_prob)
 
         layer += 1
 
@@ -106,7 +108,6 @@ class ConvNet:
         self.logger.info("\tconv2d Layer %s: %s", layer, conv3.get_shape())
         conv3 = self.maxpool2d(conv3, strides=4)
         self.logger.info("\tmaxpool2d Layer %s: %s", layer, conv3.get_shape())
-        conv3 = tf.nn.dropout(conv3, keep_prob)
 
         layer = 1
 
@@ -184,6 +185,12 @@ class ConvNet:
         self.logger.info("init tf variables ...")
         init_tf = tf.initialize_all_variables()
 
+        # Measurements use for graphing loss and accuracy
+        batches = []
+        loss_batch = []
+        train_acc_batch = []
+        valid_acc_batch = []
+
         self.logger.info("launch graph ...")
 
         with tf.Session(config=tf.ConfigProto(log_device_placement=False, gpu_options = tf.GPUOptions(allow_growth=True))) as sess:
@@ -208,11 +215,36 @@ class ConvNet:
 
                 self.logger.info("Epoch %04d cost=%s, train_accurarcy=%s, validation_acc=%s" % ((epoch+1), "{:.9f}".format(loss), "{:.5f}".format(training_acc), "{:.5f}".format(validation_acc)))
 
+                # Log batches
+                previous_batch = batches[-1] if batches else 0
+                batches.append(batch_size + previous_batch)
+                loss_batch.append(loss)
+                train_acc_batch.append(training_acc)
+                valid_acc_batch.append(validation_acc)
+
+            self.__loss_accuracy_plot(batches, loss_batch, train_acc_batch, valid_acc_batch)
+
             if self.test_data:
                 self.__test_data_accuracy()
 
+
             self.logger.info("Optimization Finished!")
             self.__save(sess)
+
+    def __loss_accuracy_plot(self, batches, loss_batch, train_acc_batch, valid_acc_batch):
+        loss_plot = plt.subplot(211)
+        loss_plot.set_title('Loss')
+        loss_plot.plot(batches, loss_batch, 'g')
+        loss_plot.set_xlim([batches[0], batches[-1]])
+        acc_plot = plt.subplot(212)
+        acc_plot.set_title('Accuracy')
+        acc_plot.plot(batches, train_acc_batch, 'r', label='Training Accuracy')
+        acc_plot.plot(batches, valid_acc_batch, 'b', label='Validation Accuracy')
+        acc_plot.set_ylim([0, 1.0])
+        acc_plot.set_xlim([batches[0], batches[-1]])
+        acc_plot.legend(loc=4)
+        plt.tight_layout()
+        plt.savefig("train_loss_accuracy_plot.png")
 
     def __test_data_accuracy(self):
         self.logger.info("Testing ...")
@@ -235,23 +267,15 @@ class ConvNet:
 
         self.logger.info("Accuracy: %s" % (acc / batch_count))
 
-    def restore_session(self):
-        if os.path.isfile(self.saved_model_file):
-            sess = tf.Session()
-            new_saver = tf.train.import_meta_graph(self.saved_model_meta_file)
-            new_saver.restore(sess, self.saved_model_file)
-            all_vars = tf.trainable_variables()
-            return sess
-        else:
-            raise FileNotFoundError("saved model files %s, %s missing!" % (self.saved_model_file, self.saved_model_meta_file))
-
     def __save(self, session_tf):
-        self.logger.info("Saving model ...")
-        saver = tf.train.Saver()
-        saver.save(session_tf, self.saved_model_file)
+        if self.save_model:
+            self.logger.info("Saving model ...")
+            saver = tf.train.Saver()
+            saver.save(session_tf, self.saved_model_file)
+        self.logger.info("Done!")
 
 class PredictConvNet(ConvNet):
-    def __init__(self, image_file):
+    def __init__(self, saved_model_file, image_file):
         self.image_data = ImageData()
         img, self.image_height, self.image_width, self.color_channels = self.image_data.load_image_from_file(image_file)
 
@@ -262,19 +286,27 @@ class PredictConvNet(ConvNet):
         super(PredictConvNet, self).__init__(None, None)
 
         logging.basicConfig(format="%(asctime)s %(message)s", level=logging.INFO)
+        self.saved_model_file = saved_model_file
         self.logger = logging.getLogger(__name__)
         self.logger.info("loaded image %s into features: %s" % (image_file, str(self.features.shape)))
 
-    def predict(self, top_k=1):
+    def predict(self, k=1):
         self.logger.info("Predict: Loading trained graph ...")
 
         self.build_nn()
 
-        saver = tf.train.Saver()
         with tf.Session() as sess:
-            saver.restore(sess, self.saved_model_file)
+            self.logger.info("Loading %s %s" % (self.saved_model_file + ".meta", self.saved_model_file))
+
+            new_saver = tf.train.import_meta_graph(self.saved_model_file + ".meta")
+            new_saver.restore(sess, self.saved_model_file)
 
             y_pred = tf.nn.softmax(self.logits_tf)
-            top_k_op = tf.nn.top_k(y_pred, k=top_k)
+            top_k_op = tf.nn.top_k(y_pred, k=k)
             top_k = sess.run(top_k_op, feed_dict={self.features_tf: self.features, self.keep_prob_tf: 1.0})
-            self.logger.info("Prediction: %s" % self.image_data.n_labels_friendly_names.get(str(top_k.indices[0][0])))
+
+            if k == 1:
+                self.logger.info("Prediction: %s" % self.image_data.n_labels_friendly_names.get(str(top_k.indices[0][0])))
+            else:
+                for n in range(k):
+                    self.logger.info("Prediction %s: %s (Prob: %s)" % (n, self.image_data.n_labels_friendly_names.get(str(top_k.indices[0][n])), top_k.values[0][n]))
