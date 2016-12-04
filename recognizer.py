@@ -26,7 +26,7 @@ parser.add_argument('-genfakedata', action="store_true", help='Generate addition
 parser.add_argument('-input_image', default="data/my-sample-images/t1.png", help="Input image to use for classification (required when cmd=predict")
 parser.add_argument('-chkpt', default="dnn-traffic-signs-trained-model.dat", help="Saved checkpoint file)")
 parser.add_argument('-debug', action="store_true", help='Run in debug mode (smaller data sets for testing purposes)')
-parser.add_argument('-cmd', default="traindnn", help='Recognizer commands', choices=['dumpdata', 'preprocess', 'traindnn', 'unittests', 'predict'])
+parser.add_argument('-cmd', default="traindnn", help='Recognizer commands', choices=['dumpdata', 'preprocess', 'traindnn', 'predict'])
 parser.add_argument("-v", "--verbose", help="Verbose output", action="store_true")
 args = parser.parse_args()
 
@@ -46,9 +46,6 @@ def run(args):
     elif args.cmd == "preprocess":
         train_data = TrainData(os.path.abspath(args.traindatafile), debug=debug)
         train_data.pre_process(gen_variants=args.genfakedata)
-    elif args.cmd == "unittests":
-        train_data = TrainData(os.path.abspath(args.traindatafile))
-        train_data.run_self_tests()
     elif args.cmd == "traindnn":
         train_data = TrainData(os.path.abspath(args.traindatafile), debug=debug)
         train_data.pre_process(gen_variants=args.genfakedata)
