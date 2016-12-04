@@ -10,7 +10,7 @@ usage: recognizer.py [-h] [-testdatafile TESTDATAFILE]
                      [-batch_size BATCH_SIZE] [-dropout DROPOUT]
                      [-genfakedata] [-input_image INPUT_IMAGE] [-chkpt CHKPT]
                      [-debug]
-                     [-cmd {dumpdata,preprocess,traindnn,unittests,predict}]
+                     [-cmd {dumpdata,preprocess,traindnn,predict}]
                      [-v]
 
 Traffic Signs Recognizer
@@ -39,7 +39,7 @@ optional arguments:
   -chkpt CHKPT          Saved checkpoint file)
   -debug                Run in debug mode (smaller data sets for testing
                         purposes)
-  -cmd {dumpdata,preprocess,traindnn,unittests,predict}
+  -cmd {dumpdata,preprocess,traindnn,predict}
                         Recognizer commands
   -v, --verbose         Verbose output
 ```
