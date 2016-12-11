@@ -1,4 +1,5 @@
 import matplotlib
+matplotlib.use('Agg') # Force matplotlib to not use any Xwindows backend.
 import os
 import sys
 import math
@@ -88,12 +89,6 @@ class ImageData:
     def get_is_pre_processed(self):
         return self.is_pre_processed
 
-    def to_grayscale(self):
-        raise NotImplementedError
-
-    def normalize(self):
-        raise NotImplementedError
-
     def query_yes_no(self, question, default="yes"):
         valid = {"yes": True, "y": True, "ye": True, "no": False, "n": False}
         if default is None:
@@ -133,17 +128,6 @@ class ImageData:
 
     def get_n_classes(self):
         return self.n_classes
-
-    def one_hot_encode_labels(self):
-        if not self.hot_encoded_labels:
-            """Turn labels into numbers and apply One-Hot Encoding"""
-            encoder = LabelBinarizer()
-            encoder.fit(self.labels)
-            self.labels = encoder.transform(self.labels)
-
-            # Change to float32, so it can be multiplied against the features in TensorFlow, which are float32
-            self.labels = self.labels.astype(np.float32)
-            self.hot_encoded_labels = True
 
     def dump_info(self, prompt_for_images=False):
         print("**** %s dataset ****" % (self.type()))
@@ -188,27 +172,38 @@ class ImageData:
 
             plt.show()
 
-    def to_grayscale(self, image):
+    def __to_grayscale(self, image):
         """"Convert to grayscale"""
         return cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
 
-    def to_yuvspace(self, image):
+    def __to_yuvspace(self, image, mute_uv_channels=False):
         """"Convert to YUV colorspace"""
-        return cv2.cvtColor(image, cv2.COLOR_BGR2YUV)
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2YUV)
 
+        if mute_uv_channels:
+            for i in range(image.shape[0]):
+                for j in range(image.shape[1]):
+                    image[i, j, 1] = 0  # set U chan to 0
+                    image[i, j, 2] = 0  # set V chan to 0
 
-    def normalize(self, image):
-        return cv2.normalize(image, image, alpha=0.1, beta=0.9, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
-
-
-    def mean_subtraction(self, image):
-        image = image.astype(dtype='float64')
-        image -= np.mean(image, dtype='float64', axis=0)
         return image
 
 
-    def transform_image(self, img, ang_range, shear_range, trans_range):
+    def __normalize(self, image):
+        image = cv2.normalize(image, image, alpha=0.1, beta=0.9, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
+        assert (math.isclose(np.min(image), 0.1, abs_tol=0.0001) and math.isclose(np.max(image), 0.9, abs_tol=0.0001)), "__normalize failed. The range of the input data is: %.10f to %.10f" % (np.min(image), np.max(image))
+        return image
+
+
+    def __mean_subtraction(self, image):
+        image = image.astype(dtype='float64')
+        image -= np.mean(image, dtype='float64', axis=0)
+        assert (round(np.mean(image)) == 0), "__mean_subtraction error. The mean of the input data is: %f" % np.mean(image)
+        return image
+
+
+    def __transform_image(self, img, ang_range, shear_range, trans_range):
         # Rotation
 
         ang_rot = np.random.uniform(ang_range) - ang_range / 2
@@ -237,9 +232,9 @@ class ImageData:
         return img
 
     def pre_process_image(self, image):
-        image = self.to_yuvspace(image)
-        image = self.mean_subtraction(image)
-        image = self.normalize(image)
+        image = self.__to_yuvspace(image)
+        image = self.__mean_subtraction(image)
+        image = self.__normalize(image)
         return image
 
     def load_image_from_file(self, image_file):
@@ -343,7 +338,7 @@ class TrainData(ImageData):
                 count += 1
 
             self.features = features_new
-            self.one_hot_encode_labels()
+            self.__one_hot_encode_labels()
 
             self.logger.info("Preprocessed %s features: %s" % (self.type(), len(self.features)))
             self.logger.info("1-hot encoded %s labels: %s" % (self.type(), len(self.labels)))
@@ -368,7 +363,7 @@ class TrainData(ImageData):
         new_count = 0
         for image in tqdm(self.features, desc='Generate image variants', unit='image'):
             for n in range(5):
-                new_features.append(self.transform_image(image,20,10,5))
+                new_features.append(self.__transform_image(image,20,10,5))
                 new_labels.append(self.labels[count])
                 new_count += 1
             count += 1
@@ -376,6 +371,17 @@ class TrainData(ImageData):
         self.logger.info("generated jittered images: %s" % (len(new_features)))
         self.logger.info("generate jittered image labels: %s" % (len(new_labels)))
         return np.asarray(new_features), np.asarray(new_labels)
+
+    def __one_hot_encode_labels(self):
+        if not self.hot_encoded_labels:
+            """Turn labels into numbers and apply One-Hot Encoding"""
+            encoder = LabelBinarizer()
+            encoder.fit(self.labels)
+            self.labels = encoder.transform(self.labels)
+
+            # Change to float32, so it can be multiplied against the features in TensorFlow, which are float32
+            self.labels = self.labels.astype(np.float32)
+            self.hot_encoded_labels = True
 
     def run_self_tests(self):
         # batching tests ..
@@ -393,7 +399,7 @@ class TrainData(ImageData):
         self.logger.info("Testing hot 1 encoding ...")
         # test one_hot_encode_labels
         old_labels = self.labels
-        self.one_hot_encode_labels()
+        self.__one_hot_encode_labels()
 
         for n in tqdm(range(len(self.labels)), desc='Testing hot-1-encodings', unit='label'):
             label = old_labels[n]
@@ -409,19 +415,6 @@ class TrainData(ImageData):
 
             assert(hot_0_count == self.n_classes - 1)
             assert(hot_1_count == 1)
-
-        self.logger.info("Testing grayscale conversion ...")
-        sample_image = self.to_grayscale(self.features[0])
-        flatten = np.reshape(sample_image, (self.get_image_height() * self.get_image_width()))
-
-        self.logger.info("Testing normalization (min/max encoding) ...")
-        sample_image = self.normalize(self.features[0])
-        flatten = np.reshape(sample_image, (self.get_image_height() * self.get_image_width() * 3,))
-        if __name__ == '__main__':
-            for pixel_data in flatten:
-                if not(pixel_data >= 0.1 and pixel_data <= 0.9001):
-                    logging.warning("mix/max (0.1 - 0.9) encoded pixel value is: ", pixel_data)
-                assert(pixel_data >= 0.1 and pixel_data <= 0.9001)
 
     def __display_image_data(self, features, labels):
         unique_labels, unique_label_indices = np.unique(labels, return_index=True)

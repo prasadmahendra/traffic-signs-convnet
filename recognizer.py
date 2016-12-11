@@ -35,7 +35,7 @@ if args.verbose:
 
 def run(args):
     logger.info("Running cmd: %s" % (args.cmd))
-    debug = True #args.debug
+    debug = args.debug
 
     if args.cmd == "dumpdata":
         train_data = TrainData(os.path.abspath(args.traindatafile))
